@@ -15,6 +15,16 @@ import os, sys, base64, json, urllib.request, urllib.parse
 from datetime import datetime, timezone
 from collections import defaultdict, Counter
 
+# Carrega .env se existir (sem dependência externa)
+_env = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env):
+    with open(_env) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 PAT      = os.environ.get("ADO_PAT", "")
 ORG      = "2clix"
 PROJECT  = "Plataforma Qualidade"
