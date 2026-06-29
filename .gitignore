@@ -38,3 +38,6 @@ Thumbs.db
 *.env
 .env.local
 secrets.json
+
+# Logs de execução (runtime local, não versionado)
+logs/
