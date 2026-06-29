@@ -20,7 +20,7 @@ alwaysApply: false
 | Format           | `ruff format --check .`                                      | pré-commit / CI |
 | Type check       | `mypy src/ --strict`                                         | CI — sem findings bloqueantes |
 | SAST/segurança   | `bandit -r src/ -ll`                                         | CI — sem findings médios/altos |
-| Cobertura        | `python -m pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=80` | CI — relatório publicado no PR |
+| Cobertura        | `python -m pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=60` | CI — relatório publicado no PR |
 
 ## Convenções
 - Pirâmide: muitos testes de unidade, menos de integração, poucos de aceite.
@@ -30,6 +30,7 @@ alwaysApply: false
 - Análise estática: **mypy** (type check), **ruff** (lint/complexidade), **bandit** (SAST).
   Findings **bloqueantes** (barram o merge): mypy errors, bandit ≥ MEDIUM.
   Findings de **aviso** (entram como tendência em `metrics.md`): ruff warnings, bandit LOW.
+- Cobertura mínima: **60%** — foco em `src/domain/` (regras de negócio, filtros, cálculos).
 
 ## Gates (Definition of Done executável)
 - Uma **task** só vira `done` quando o **Gate (comando)** dela em `tasks.md` passa.

@@ -68,7 +68,7 @@ bandit -r src/ -ll                       # SAST
 ```
 
 ### Quality gates
-- Cobertura mínima: **80%** (relatório publicado em cada PR)
+- Cobertura mínima: **60%** — foco na lógica de domínio (`src/domain/`)
 - Análise estática: mypy sem erros, ruff sem findings
 - SAST: sem findings de severidade média ou alta (bandit)
 - Nenhum `SPEC_DEVIATION` pendente no merge

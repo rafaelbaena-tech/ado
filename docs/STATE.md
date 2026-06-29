@@ -13,13 +13,14 @@ alwaysApply: true
 **Última atualização:** 2026-06-29 por Rafael Baena
 
 ## Em andamento / próximo passo
-> O que está aberto agora e a **próxima ação concreta** (não "continuar a feature" — diga o passo).
-- Projeto inicializado com boilerplate SDD (spec-driven)
-- Próximo passo: rodar `/kickoff` para preencher vision.md, context-map.md, ADRs e roadmap
+- Kickoff brownfield concluído ✓
+- Próximo passo: abrir primeira feature com `/nova-feature` — **Filtro tasks por PBI** (maior dor relatada)
 
 ## Decisões recentes
-> Resumo cronológico. Se for difícil de reverter, vire um ADR e linke aqui.
-- 2026-06-29: Adotado boilerplate SDD (spec-driven) para organizar o desenvolvimento Python + IA
+- 2026-06-29: Kickoff brownfield concluído — vision, roadmap, assessment e ADRs gerados
+- 2026-06-29: Cobertura mínima definida em 60% (foco em domínio) — [ADR implícito no TESTING.md]
+- 2026-06-29: Clipboard export via `--clip` como canal de stakeholders — [ADR-0004](architecture/adr/0004-clipboard-export.md)
+- 2026-06-29: stdlib HTTP mantido (sem requests) — [ADR-0002](architecture/adr/0002-stdlib-http.md)
 
 ## Bloqueios
 - [ ] _nenhum bloqueio no momento_
@@ -30,6 +31,6 @@ alwaysApply: true
 - Considerar cache local das queries ADO para reduzir latência
 
 ## Todos soltos
-- [ ] Rodar `/kickoff` para preencher os artefatos de produto e arquitetura
-- [ ] Rodar `/integracoes` para mapear Azure DevOps + Anthropic como MCPs
-- [ ] Definir estrutura de testes (`pytest`) para `backlog.py`
+- [ ] Preencher `ANTHROPIC_API_KEY` no `.env` para ativar o comando `ask`
+- [ ] Rodar `/integracoes` para mapear Azure DevOps + Anthropic como MCPs (roadmap Later)
+- [ ] Backfill de context-map.md com bounded contexts identificados no kickoff
