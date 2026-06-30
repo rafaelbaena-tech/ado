@@ -5,12 +5,13 @@ Uso:
     python3 backlog.py              # menu interativo
     python3 backlog.py resumo       # resumo geral
     python3 backlog.py daily        # pauta da daily
+    python3 backlog.py refinamento  # refinamento de demandas (tag dev)
     python3 backlog.py jornal       # jornal de demandas
     python3 backlog.py gargalos     # gargalos e bloqueios
     python3 backlog.py wip          # WIP por pessoa
     python3 backlog.py parados      # items sem movimento
-    python3 backlog.py tasks        # tasks por dev (PBI → subtasks)
     python3 backlog.py ask          # chat com Claude
+    python3 backlog.py tasks        # tasks por dev (PBI → subtasks)
 """
 import os, sys, base64, json, urllib.request, urllib.parse
 from datetime import datetime, timezone
@@ -373,6 +374,39 @@ def is_done(i):
 def is_active(i):
     return any(k in i["state"].lower() for k in ["andamento","executar","fazendo","in progress","doing","to do","new","discovery","committed","active"])
 
+# ── Histórico de atividade por pessoa ─────────────────────────────────────────
+_updates_cache = {}
+
+def fetch_last_touch(item_id, person_frag):
+    """Days since person_frag last modified item_id. Session-level cache avoids repeat fetches."""
+    if item_id not in _updates_cache:
+        try:
+            url  = BASE_ORG + "/wit/workitems/" + str(item_id) + "/updates?api-version=7.1"
+            data = ado_get(url)
+            _updates_cache[item_id] = data.get("value", [])
+        except Exception:
+            _updates_cache[item_id] = []
+    for rev in reversed(_updates_cache[item_id]):
+        name = rev.get("revisedBy", {}).get("displayName", "")
+        if person_frag and person_frag.lower() in name.lower():
+            d = days_since(rev.get("revisedDate"))
+            if d is not None and d >= 0:  # ignora sentinela 9999-01-01 do ADO
+                return d
+    return None
+
+def stale_sfx(item_id, person_frag, changed_date):
+    """⏱Nd indicator: usa atividade da pessoa; só faz fetch quando changedDate > 2d."""
+    d_any = days_since(changed_date)
+    if not d_any or d_any <= 2:
+        return ""
+    d = fetch_last_touch(item_id, person_frag) if person_frag else None
+    if d is None:
+        d = d_any
+    if d <= 2:
+        return ""
+    col = RE if d > 10 else YE
+    return "  " + col + "⏱" + str(d) + "d" + RS
+
 # ── Comandos ──────────────────────────────────────────────────────────────────
 def cmd_resumo(data):
     flat = [i for v in data.values() for i in v]
@@ -535,9 +569,11 @@ def cmd_daily(data):
         if parados:
             print("\n  " + y("Parados há +5 dias (" + str(len(parados)) + "):"))
             for i in sorted(parados, key=lambda x: days_since(x["changedDate"]) or 0, reverse=True)[:4]:
-                iid = i["id"]
-                d   = days_since(i["changedDate"])
-                print("     " + r(str(d)+"d") + "  " + dim("#"+str(iid)) + "  " + type_tag(i["type"]) + "  " + i["title"][:44] + "  " + dim(i["assignedTo"]))
+                iid    = i["id"]
+                person = (i["assignedTo"] or "").split()[0]
+                d_p    = fetch_last_touch(i["id"], person)
+                d_disp = d_p if d_p is not None else (days_since(i["changedDate"]) or 0)
+                print("     " + r(str(d_disp)+"d") + "  " + dim("#"+str(iid)) + "  " + type_tag(i["type"]) + "  " + i["title"][:44] + "  " + dim(i["assignedTo"]))
         print()
 
 def cmd_jornal(data):
@@ -788,10 +824,9 @@ def cmd_tasks(data):
                   dim("resp: "+parent.get("assignedTo","")[:18]) + "  " +
                   pct_bar(done_c, total_c))
             for t in sorted(ptasks, key=lambda x: x["state"]):
-                d   = days_since(t["changedDate"])
-                sfx_t = "  " + y("⏱"+str(d)+"d") if d and d > 2 else ("  " + dim(str(d)+"d") if d else "")
-                blk   = r("  ●") if is_blocked(t) else ""
                 done_m = g(" ✓") if is_done(t) else ""
+                blk    = r("  ●") if is_blocked(t) else ""
+                sfx_t  = "" if is_done(t) or is_blocked(t) else stale_sfx(t["id"], frag, t["changedDate"])
                 print("  " + dim("│  #"+str(t["id"])) + "  " +
                       type_tag(t["type"]) + "  " +
                       sc(t["state"])+t["state"][:18]+RS + "  " +
@@ -799,8 +834,7 @@ def cmd_tasks(data):
             print("  " + dim("└"))
 
         for t in orphans:
-            d   = days_since(t["changedDate"])
-            sfx_t = "  " + y("⏱"+str(d)+"d") if d and d > 2 else ""
+            sfx_t = "" if is_done(t) else stale_sfx(t["id"], frag, t["changedDate"])
             print("  " + dim("  #"+str(t["id"])) + "  " +
                   type_tag(t["type"]) + "  " +
                   sc(t["state"])+t["state"][:18]+RS + "  " + t["title"][:44] + sfx_t)
@@ -827,16 +861,129 @@ def cmd_tasks(data):
             }
     log_execution("tasks", {"parents": n_parents, "tasks": len(tasks), "by_dev": by_dev_stats})
 
+def cmd_refinamento(data):
+    items = data.get("Refinamento", [])
+
+    def has_dev_tag(i):
+        tags = (i.get("tags") or "").lower()
+        return "dev" in [t.strip() for t in tags.split(";")]
+
+    dev_items = [i for i in items if has_dev_tag(i)]
+    dev_items.sort(key=lambda x: x.get("createdDate") or "")
+
+    print_logo("Refinamento · Plataforma Qualidade")
+    section(
+        "REFINAMENTO DE DEMANDAS — TAG DEV (" + str(len(dev_items)) + ")",
+        BL, "Mais antigas → mais novas · pendentes de estimativa e subtasks"
+    )
+
+    if not dev_items:
+        print("  " + dim("Nenhuma demanda com tag dev na query Refinamento.") + "\n")
+        return
+
+    print(dim("  Buscando subtasks via Relations API..."))
+    tasks, parent_map = fetch_children_of(dev_items)
+    tasks_by_parent = defaultdict(list)
+    for t in tasks:
+        parent = parent_map.get(t["id"])
+        if parent:
+            tasks_by_parent[parent["id"]].append(t)
+    print("  " + g("✓") + "  " + str(len(tasks)) + " tasks encontradas\n")
+
+    total_pbi_effort = 0.0
+    total_task_effort = 0.0
+
+    for item in dev_items:
+        iid    = item["id"]
+        effort = item.get("effort")
+        pri    = item["priority"]
+        state  = item["state"]
+        d_age  = days_since(item.get("createdDate"))
+        tags   = item.get("tags") or ""
+
+        eff_str = (g(str(effort) + "h") if effort else y("sem estimativa"))
+        tags_parts = [t.strip() for t in tags.split(";") if t.strip()]
+        tags_disp  = "  ".join(dim("[" + t + "]") for t in tags_parts)
+
+        age_sfx = ("  " + dim(str(d_age) + "d")) if d_age is not None else ""
+
+        print(BD + BL + "▶ #" + str(iid) + RS + "  " +
+              type_tag(item["type"]) + "  " +
+              pc(pri) + "P" + pri + RS + "  " +
+              sc(state) + state[:22] + RS + "  " +
+              WH + BD + item["title"][:54] + RS +
+              age_sfx)
+        if tags_parts:
+            print("  " + dim("   tags: ") + tags_disp +
+                  "  " + dim("esforço PBI: ") + eff_str)
+
+        if effort:
+            try:
+                total_pbi_effort += float(effort)
+            except ValueError:
+                pass
+
+        sub = tasks_by_parent.get(iid, [])
+        if sub:
+            sub_sum = 0.0
+            for t in sorted(sub, key=lambda x: x.get("state") or ""):
+                t_eff   = t.get("effort")
+                t_eff_s = (g(str(t_eff) + "h") if t_eff else dim("—"))
+                if t_eff:
+                    try:
+                        v = float(t_eff)
+                        sub_sum += v
+                        total_task_effort += v
+                    except ValueError:
+                        pass
+                person = (t["assignedTo"] or "").split()[0]
+                done_m = g(" ✓") if is_done(t) else ""
+                stale  = "" if is_done(t) else stale_sfx(t["id"], person, t["changedDate"])
+                print("  " + dim("│  #" + str(t["id"])) + "  " +
+                      type_tag(t["type"]) + "  " +
+                      sc(t["state"]) + t["state"][:18] + RS + "  " +
+                      t["title"][:42] + "  " +
+                      dim("esf: ") + t_eff_s + "  " +
+                      dim(t["assignedTo"][:20]) + stale + done_m)
+            sfx_sum = ("  " + dim("total: ") + g(str(sub_sum) + "h")) if sub_sum else ""
+            print("  " + dim("└" + sfx_sum))
+        else:
+            print("  " + dim("└ sem subtasks — criar tasks e estimar"))
+        print()
+
+    sem_est = sum(1 for i in dev_items if not i.get("effort"))
+    com_tasks = sum(1 for i in dev_items if tasks_by_parent.get(i["id"]))
+
+    print(BL + BD + "─" * 50 + RS)
+    print("  Demandas com tag dev:       " + bold(w(str(len(dev_items)))))
+    print("  Com subtasks criadas:       " + bold((g if com_tasks == len(dev_items) else y)(str(com_tasks) + "/" + str(len(dev_items)))))
+    print("  Sem estimativa PBI:         " + (bold(y(str(sem_est))) if sem_est else g("0 ✓")))
+    if total_pbi_effort:
+        print("  Esforço estimado (PBIs):    " + bold(g(str(total_pbi_effort) + "h")))
+    if total_task_effort:
+        print("  Esforço estimado (tasks):   " + bold(g(str(total_task_effort) + "h")))
+    print()
+
+    log_execution("refinamento", {
+        "total": len(dev_items),
+        "com_tasks": com_tasks,
+        "sem_estimativa": sem_est,
+        "esforco_pbi_h": total_pbi_effort,
+        "esforco_tasks_h": total_task_effort,
+    })
+
+
 # ── Menu ──────────────────────────────────────────────────────────────────────
 MENU = {
-    "1": ("resumo",   "Resumo geral",             cmd_resumo),
-    "2": ("daily",    "Daily — pauta por dev",     cmd_daily),
-    "3": ("jornal",   "Jornal de Demandas",        cmd_jornal),
-    "4": ("gargalos", "Gargalos e bloqueios",      cmd_gargalos),
-    "5": ("wip",      "WIP por pessoa",            cmd_wip),
-    "6": ("parados",  "Items parados há +3 dias",  cmd_parados),
-    "7": ("ask",      "Perguntar ao Claude  ✦ IA", cmd_ask),
-    "8": ("tasks",    "Tasks por dev  (PBI → subtasks + %)", cmd_tasks),
+    "1": ("resumo",       "Resumo geral",                          cmd_resumo),
+    "2": ("daily",        "Daily — pauta por dev",                 cmd_daily),
+    "3": ("refinamento",  "Refinamento de demandas  (tag dev)",    cmd_refinamento),
+    "4": ("jornal",       "Jornal de Demandas",                    cmd_jornal),
+    "5": ("gargalos",     "Gargalos e bloqueios",                  cmd_gargalos),
+    "6": ("wip",          "WIP por pessoa",                        cmd_wip),
+    "7": ("parados",      "Items parados há +3 dias",              cmd_parados),
+    "8": ("ask",          "Perguntar ao Claude  ✦ IA",             cmd_ask),
+    "9": ("tasks",        "Tasks por dev  (PBI → subtasks + %)",   cmd_tasks),
 }
 
 def menu_interativo(data):
@@ -884,4 +1031,4 @@ if __name__ == "__main__":
         if match:
             match(data)
         else:
-            print(r("Comando inválido. Use: resumo | daily | jornal | gargalos | wip | parados | ask"))
+            print(r("Comando inválido. Use: resumo | daily | refinamento | jornal | gargalos | wip | parados | ask | tasks"))
