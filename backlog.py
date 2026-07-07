@@ -69,8 +69,9 @@ QA_DEVS = [
     ("fernando.alucema",  "QA",                  "fernando"),
 ]
 INTEGRACOES = [
-    ("Felipe Gurgel",     "Back Integrações ★",  "Felipe"),
     ("Keven Soares",      "Back Integrações ★",  "Keven"),
+    ("Felipe Gurgel",     "Back Integrações ★",  "Felipe"),
+    ("Henrique Sandim",   "Back Integrações",    "Henrique"),
 ]
 GESTAO = [
     ("Rafael Baena",      "Gestão Dev",          "Baena"),
