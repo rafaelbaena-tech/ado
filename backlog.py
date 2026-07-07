@@ -475,6 +475,13 @@ def cmd_daily(data):
         if not is_pbi_in_progress(parent_map.get(t["id"], {}))
     }
 
+    # Mapa child_id → título do PBI parent (para prefixo no daily)
+    parent_title_map: dict = {
+        t["id"]: parent_map[t["id"]].get("title", "")
+        for t in all_children
+        if t["id"] in parent_map and is_pbi_in_progress(parent_map[t["id"]])
+    }
+
     # Remove do flat inicial tasks que vieram direto das queries mas pertencem a PBIs inativos
     flat = [i for i in flat if i["id"] not in inactive_task_ids]
     seen = {i["id"] for i in flat}
@@ -491,19 +498,22 @@ def cmd_daily(data):
     try:
         direct_tasks = fetch_tasks_direct(PROJECT, types=("Task", "Bug"))
 
-        # Parents de tasks diretas que NÃO estão em flat — precisa buscar o estado deles
+        # Parents de tasks diretas que NÃO estão em flat — busca estado E título de uma vez
         unknown_pids = {
             t["parentId"] for t in direct_tasks
             if t.get("parentId") and t["parentId"] not in seen
         }
-        unknown_parent_state: dict = {}
+        unknown_parent_info: dict = {}
         if unknown_pids:
             id_str = ",".join(str(i) for i in unknown_pids)
             try:
                 resp = ado_get(BASE_ORG + "/wit/workitems?ids=" + id_str
-                               + "&fields=System.State&api-version=7.1")
+                               + "&fields=System.State,System.Title&api-version=7.1")
                 for wi in resp.get("value", []):
-                    unknown_parent_state[wi["id"]] = wi["fields"].get("System.State", "")
+                    unknown_parent_info[wi["id"]] = {
+                        "state": wi["fields"].get("System.State", ""),
+                        "title": wi["fields"].get("System.Title", ""),
+                    }
             except Exception:
                 pass
 
@@ -514,14 +524,15 @@ def cmd_daily(data):
             pid = t.get("parentId")
             if pid:
                 if pid in flat_by_id:
-                    # Parent está no flat — verifica se está em andamento
                     if not is_pbi_in_progress(flat_by_id[pid]):
                         continue
-                elif pid in unknown_parent_state:
-                    # Parent fora do flat — usa o estado buscado acima
-                    st = unknown_parent_state[pid]
+                    parent_title_map[t["id"]] = flat_by_id[pid].get("title", "")
+                elif pid in unknown_parent_info:
+                    info = unknown_parent_info[pid]
+                    st   = info["state"]
                     if not any(k in st.lower() for k in ["andamento","in progress","doing","fazendo"]):
                         continue
+                    parent_title_map[t["id"]] = info["title"]
             seen.add(t["id"])
             flat.append(t)
             added += 1
@@ -544,6 +555,14 @@ def cmd_daily(data):
     all_incidents = [i for i in data.get("Incidentes Cross", [])
                      if i["state"].lower() in _incident_states]
     _incident_ids = {i["id"] for i in all_incidents}
+
+    def titled(i, maxw=48):
+        """Título da task prefixado com [PBI] quando há parent em andamento."""
+        pbi = parent_title_map.get(i["id"], "")
+        if pbi and i["type"] not in PARENT_TYPES:
+            pfx = dim("[" + pbi[:22] + "] ")
+            return pfx + i["title"][:max(1, maxw - 25)]
+        return i["title"][:maxw]
 
     def show_incidents_for(frag, header=None):
         mine = [i for i in all_incidents if frag.lower() in i["assignedTo"].lower()]
@@ -578,7 +597,7 @@ def cmd_daily(data):
             print("  " + g("✅ Finalizados (" + str(len(done_it)) + "):"))
             for i in done_it[:3]:
                 iid = i["id"]
-                print("     " + ilink(iid) + "  " + type_tag(i["type"]) + "  " + i["title"][:48] + "  " + dim("["+i["state"]+"]"))
+                print("     " + ilink(iid) + "  " + type_tag(i["type"]) + "  " + titled(i) + "  " + dim("["+i["state"]+"]"))
         if active:
             hidden = len(active) - 8
             sfx_h  = "  " + dim("+ "+str(hidden)+" não exibidos") if hidden > 0 else ""
@@ -587,12 +606,12 @@ def cmd_daily(data):
                 iid = i["id"]
                 d   = days_since(i["changedDate"])
                 sfx = "  " + y(" ⏱ "+str(d)+"d") if d and d > 2 else ""
-                print("     " + ilink(iid) + "  " + type_tag(i["type"]) + "  " + i["title"][:48] + sfx)
+                print("     " + ilink(iid) + "  " + type_tag(i["type"]) + "  " + titled(i) + sfx)
         if blocked:
             print("  " + r("🔴 Reprovado/Bloqueado (" + str(len(blocked)) + "):"))
             for i in blocked:
                 iid = i["id"]
-                print("     " + ilink(iid) + "  " + type_tag(i["type"]) + "  " + r(i["title"][:48]))
+                print("     " + ilink(iid) + "  " + type_tag(i["type"]) + "  " + r(titled(i)))
         if not active and not done_it and not blocked:
             outros = [i for i in items if not is_active(i) and not is_done(i) and not is_blocked(i)]
             if outros:
