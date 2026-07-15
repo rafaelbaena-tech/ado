@@ -476,11 +476,14 @@ def cmd_daily(data):
         if not is_pbi_in_progress(parent_map.get(t["id"], {}))
     }
 
-    # Mapa child_id → título do PBI parent (para prefixo no daily)
+    # Mapas child_id → título/ativo do PBI parent (para prefixo verde/cinza no daily)
     parent_title_map: dict = {
         t["id"]: parent_map[t["id"]].get("title", "")
-        for t in all_children
-        if t["id"] in parent_map and is_pbi_in_progress(parent_map[t["id"]])
+        for t in all_children if t["id"] in parent_map
+    }
+    parent_active_map: dict = {
+        t["id"]: is_pbi_in_progress(parent_map[t["id"]])
+        for t in all_children if t["id"] in parent_map
     }
 
     # Remove do flat inicial tasks que vieram direto das queries mas pertencem a PBIs inativos
@@ -527,13 +530,15 @@ def cmd_daily(data):
                 if pid in flat_by_id:
                     if not is_pbi_in_progress(flat_by_id[pid]):
                         continue
-                    parent_title_map[t["id"]] = flat_by_id[pid].get("title", "")
+                    parent_title_map[t["id"]]  = flat_by_id[pid].get("title", "")
+                    parent_active_map[t["id"]] = True
                 elif pid in unknown_parent_info:
                     info = unknown_parent_info[pid]
                     st   = info["state"]
                     if not any(k in st.lower() for k in ["andamento","in progress","doing","fazendo"]):
                         continue
-                    parent_title_map[t["id"]] = info["title"]
+                    parent_title_map[t["id"]]  = info["title"]
+                    parent_active_map[t["id"]] = True
             seen.add(t["id"])
             flat.append(t)
             added += 1
@@ -542,6 +547,38 @@ def cmd_daily(data):
 
     if added:
         print("  " + g("✓") + " " + str(added) + " tasks adicionadas\n")
+
+    # Gap-fill: parent_title_map para tasks que vieram direto das queries (não via parent_map)
+    _flat_by_id = {i["id"]: i for i in flat}
+    _gap_pids   = {
+        i["parentId"] for i in flat
+        if i.get("parentId") and i["type"] not in PARENT_TYPES and i["id"] not in parent_title_map
+    }
+    _gap_info: dict = {}
+    for pid in _gap_pids & _flat_by_id.keys():
+        p = _flat_by_id[pid]
+        _gap_info[pid] = {"title": p.get("title",""), "state": p.get("state","")}
+    _fetch_pids = _gap_pids - _flat_by_id.keys()
+    if _fetch_pids:
+        try:
+            resp = ado_get(BASE_ORG + "/wit/workitems?ids=" + ",".join(str(i) for i in _fetch_pids)
+                           + "&fields=System.State,System.Title&api-version=7.1")
+            for wi in resp.get("value", []):
+                _gap_info[wi["id"]] = {
+                    "state": wi["fields"].get("System.State",""),
+                    "title": wi["fields"].get("System.Title",""),
+                }
+        except Exception:
+            pass
+    for i in flat:
+        pid = i.get("parentId")
+        if pid and i["type"] not in PARENT_TYPES and i["id"] not in parent_title_map:
+            info = _gap_info.get(pid)
+            if info:
+                parent_title_map[i["id"]]  = info["title"]
+                parent_active_map[i["id"]] = any(
+                    k in info["state"].lower() for k in ["andamento","in progress","doing","fazendo"]
+                )
 
     now  = datetime.now().strftime("%d/%m/%Y %H:%M")
     print_logo("Daily · " + now)
@@ -558,10 +595,11 @@ def cmd_daily(data):
     _incident_ids = {i["id"] for i in all_incidents}
 
     def titled(i, maxw=48):
-        """Título da task prefixado com [PBI] quando há parent em andamento."""
+        """Título da task prefixado com [PBI] — verde se em andamento, cinza se outro estado."""
         pbi = parent_title_map.get(i["id"], "")
         if pbi and i["type"] not in PARENT_TYPES:
-            pfx = dim("[" + pbi[:22] + "] ")
+            col = GR if parent_active_map.get(i["id"]) else DM
+            pfx = col + "[" + pbi[:22] + "]" + RS + " "
             return pfx + i["title"][:max(1, maxw - 25)]
         return i["title"][:maxw]
 
